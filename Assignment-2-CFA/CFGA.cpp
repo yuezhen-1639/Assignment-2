@@ -25,6 +25,7 @@ int main(int argc, char **argv)
 
     CFGAnalysis analyzer = CFGAnalysis(icfg);
 
+    // TODO: complete the following method: 'CFGAnalysis::analyze'
     analyzer.analyze(icfg);
 
     analyzer.dumpPaths();
@@ -41,7 +42,10 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
     for (auto src : sources)
         for (auto snk : sinks)
         {
-            // The same node can occur in different calling contexts.
+            // TODO: DFS the graph, starting from src and detecting the paths ending at snk.
+            // Use the class method 'recordPath' (already defined) to record the path you detected.
+            //@{
+
             using State = pair<unsigned, stack<unsigned>>;
             set<State> visited;
             set<unsigned> activeCalls;
@@ -55,7 +59,6 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
 
                 path.push_back(nodeId);
 
-                // A recursive call to main must return to its caller first.
                 if (nodeId == snk && callStack.empty())
                 {
                     recordPath(path);
@@ -81,8 +84,6 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
                             unsigned callId =
                                 callEdge->getCallSite()->getId();
 
-                            // Bound recursion: do not re-enter an active call
-                            // site, otherwise infinitely many contexts exist.
                             if (!activeCalls.insert(callId).second)
                                 continue;
 
@@ -116,7 +117,6 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
                 }
 
                 path.pop_back();
-                // Backtrack so other branches can reach this state as well.
                 visited.erase(state);
             };
 
@@ -124,5 +124,7 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
                 callStack.pop();
 
             dfs(src);
+
+            //@}
         }
 }
