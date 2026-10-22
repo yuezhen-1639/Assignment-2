@@ -5,6 +5,7 @@
 
 #include "CFGA.h"
 #include <functional>
+#include <utility>
 
 using namespace SVF;
 using namespace llvm;
@@ -24,7 +25,6 @@ int main(int argc, char **argv)
 
     CFGAnalysis analyzer = CFGAnalysis(icfg);
 
-    // TODO: complete the following method: 'CFGAnalysis::analyze'
     analyzer.analyze(icfg);
 
     analyzer.dumpPaths();
@@ -35,19 +35,28 @@ int main(int argc, char **argv)
 
 void CFGAnalysis::analyze(SVF::ICFG *icfg)
 {
+    reachablePaths.clear();
+
     // Sources and sinks are specified when an analyzer is instantiated.
     for (auto src : sources)
         for (auto snk : sinks)
         {
-            set<unsigned> visited;
+            // The same node can occur in different calling contexts.
+            using State = pair<unsigned, stack<unsigned>>;
+            set<State> visited;
+            set<unsigned> activeCalls;
             vector<unsigned> path;
 
             function<void(unsigned)> dfs = [&](unsigned nodeId)
             {
-                visited.insert(nodeId);
+                const State state(nodeId, callStack);
+                if (!visited.insert(state).second)
+                    return;
+
                 path.push_back(nodeId);
 
-                if (nodeId == snk)
+                // A recursive call to main must return to its caller first.
+                if (nodeId == snk && callStack.empty())
                 {
                     recordPath(path);
                 }
@@ -61,9 +70,6 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
                         auto edge = *it;
                         unsigned nextId = edge->getDstNode()->getId();
 
-                        if (visited.count(nextId))
-                            continue;
-
                         auto callEdge =
                             SVFUtil::dyn_cast<CallCFGEdge>(edge);
 
@@ -72,12 +78,20 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
 
                         if (callEdge)
                         {
-                            callStack.push(
-                                callEdge->getCallSite()->getId());
+                            unsigned callId =
+                                callEdge->getCallSite()->getId();
+
+                            // Bound recursion: do not re-enter an active call
+                            // site, otherwise infinitely many contexts exist.
+                            if (!activeCalls.insert(callId).second)
+                                continue;
+
+                            callStack.push(callId);
 
                             dfs(nextId);
 
                             callStack.pop();
+                            activeCalls.erase(callId);
                         }
                         else if (retEdge)
                         {
@@ -89,8 +103,10 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
                                 continue;
 
                             callStack.pop();
+                            activeCalls.erase(callId);
                             dfs(nextId);
                             callStack.push(callId);
+                            activeCalls.insert(callId);
                         }
                         else
                         {
@@ -100,7 +116,8 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
                 }
 
                 path.pop_back();
-                visited.erase(nodeId);
+                // Backtrack so other branches can reach this state as well.
+                visited.erase(state);
             };
 
             while (!callStack.empty())
