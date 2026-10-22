@@ -4,6 +4,7 @@
  */
 
 #include "CFGA.h"
+#include <functional>
 
 using namespace SVF;
 using namespace llvm;
@@ -38,10 +39,73 @@ void CFGAnalysis::analyze(SVF::ICFG *icfg)
     for (auto src : sources)
         for (auto snk : sinks)
         {
-            // TODO: DFS the graph, starting from src and detecting the paths ending at snk.
-            // Use the class method 'recordPath' (already defined) to record the path you detected.
-            //@{
+            set<unsigned> visited;
+            vector<unsigned> path;
 
-            //@}
+            function<void(unsigned)> dfs = [&](unsigned nodeId)
+            {
+                visited.insert(nodeId);
+                path.push_back(nodeId);
+
+                if (nodeId == snk)
+                {
+                    recordPath(path);
+                }
+                else
+                {
+                    auto node = icfg->getICFGNode(nodeId);
+
+                    for (auto it = node->OutEdgeBegin();
+                         it != node->OutEdgeEnd(); ++it)
+                    {
+                        auto edge = *it;
+                        unsigned nextId = edge->getDstNode()->getId();
+
+                        if (visited.count(nextId))
+                            continue;
+
+                        auto callEdge =
+                            SVFUtil::dyn_cast<CallCFGEdge>(edge);
+
+                        auto retEdge =
+                            SVFUtil::dyn_cast<RetCFGEdge>(edge);
+
+                        if (callEdge)
+                        {
+                            callStack.push(
+                                callEdge->getCallSite()->getId());
+
+                            dfs(nextId);
+
+                            callStack.pop();
+                        }
+                        else if (retEdge)
+                        {
+                            unsigned callId =
+                                retEdge->getCallSite()->getId();
+
+                            if (callStack.empty() ||
+                                callStack.top() != callId)
+                                continue;
+
+                            callStack.pop();
+                            dfs(nextId);
+                            callStack.push(callId);
+                        }
+                        else
+                        {
+                            dfs(nextId);
+                        }
+                    }
+                }
+
+                path.pop_back();
+                visited.erase(nodeId);
+            };
+
+            while (!callStack.empty())
+                callStack.pop();
+
+            dfs(src);
         }
 }
